@@ -11,6 +11,7 @@ NestJS API starter for EarnProof.
 - Swagger documentation at `/docs`
 - PostgreSQL and Redis Docker Compose services
 - Initial Prisma schema
+- Prisma lifecycle service
 - Jest test setup
 
 ## Local Setup

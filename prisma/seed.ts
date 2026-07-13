@@ -5,14 +5,11 @@ const prisma = new PrismaClient();
 async function main() {
   await prisma.supportedAsset.upsert({
     where: {
-      code_issuer_network: {
-        code: "XLM",
-        issuer: null,
-        network: "stellar-testnet",
-      },
+      assetKey: "stellar-testnet:XLM:native",
     },
     update: {},
     create: {
+      assetKey: "stellar-testnet:XLM:native",
       code: "XLM",
       issuer: null,
       network: "stellar-testnet",

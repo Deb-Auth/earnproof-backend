@@ -1,18 +1,90 @@
 # EarnProof Backend
 
-NestJS API starter for EarnProof.
+EarnProof is an open-source, privacy-focused income and payment verification protocol built on Stellar.
 
-## Included Setup
+This repository contains the NestJS API responsible for wallet authentication, Stellar payment indexing, proof condition evaluation, credential signing, verification, revocation, issuer management, webhooks, API keys, audit logs, and operational health.
+
+## Product Role
+
+The backend is the trust and verification service for EarnProof. It should let workers create signed credentials from qualifying Stellar testnet payments while preventing verifiers from seeing full wallet history, unrelated transactions, total balances, or hidden income details.
+
+The first implementation targets Stellar testnet, Freighter wallet authentication, and signed JSON credentials.
+
+## Current Scope
+
+Implemented:
 
 - NestJS application shell
 - Versioned `/api/v1` prefix
 - Environment validation
-- Health endpoint
 - Swagger documentation at `/docs`
+- Health endpoint at `/api/v1/health`
 - PostgreSQL and Redis Docker Compose services
-- Initial Prisma schema
 - Prisma lifecycle service
-- Jest test setup
+- Prisma schema for core product entities
+- Initial database migration
+- Seed script for native XLM testnet asset
+- Jest setup
+
+Core entities currently modeled:
+
+- Users
+- Wallet challenges
+- Organizations
+- Issuers
+- Supported assets
+- Payments
+- Trusted sources
+- Proofs
+- Proof claims
+- Attestations
+- Verification events
+- API keys
+- Webhooks
+- Audit logs
+
+Planned next:
+
+- Wallet challenge generation
+- Freighter-compatible signature verification
+- Session handling
+- Stellar testnet payment synchronization
+- Payment classification endpoints
+- Proof generation
+- Credential signing and verification
+- Public verification endpoints
+- Revocation workflow
+
+## Tech Stack
+
+- NestJS
+- TypeScript
+- PostgreSQL
+- Prisma
+- Redis
+- BullMQ, planned
+- Stellar JavaScript SDK, planned
+- OpenAPI/Swagger
+- Jest
+- Docker Compose
+
+## Repository Structure
+
+```text
+src/
+  app.module.ts
+  main.ts
+  config/
+  database/
+  health/
+  common/
+prisma/
+  schema.prisma
+  seed.ts
+  migrations/
+test/
+docs/
+```
 
 ## Local Setup
 
@@ -21,7 +93,14 @@ npm install
 cp .env.example .env
 docker compose up -d
 npm run prisma:generate
+npm run prisma:migrate
 npm run start:dev
+```
+
+Default local API:
+
+```text
+http://localhost:4000/api/v1
 ```
 
 Health check:
@@ -29,3 +108,61 @@ Health check:
 ```text
 GET http://localhost:4000/api/v1/health
 ```
+
+Swagger docs:
+
+```text
+http://localhost:4000/docs
+```
+
+## Environment Variables
+
+```env
+NODE_ENV=development
+PORT=4000
+DATABASE_URL=postgresql://earnproof:earnproof@localhost:5432/earnproof
+REDIS_URL=redis://localhost:6379
+APP_URL=http://localhost:3000
+API_URL=http://localhost:4000
+STELLAR_NETWORK=testnet
+STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
+STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+SESSION_SECRET=replace_me
+CREDENTIAL_SIGNING_SECRET=replace_me
+```
+
+Use strong secrets outside local development. Do not commit `.env`.
+
+## Validation
+
+```bash
+npm run test
+npm run build
+```
+
+Prisma validation:
+
+```bash
+$env:DATABASE_URL='postgresql://earnproof:earnproof@localhost:5432/earnproof'
+npx prisma validate
+```
+
+## Privacy and Security Requirements
+
+- Do not log raw wallet signatures.
+- Do not log exact income values.
+- Do not expose selected source transactions to verifiers.
+- Store API keys as hashes only.
+- Store webhook secrets as hashes or encrypted values.
+- Hash wallet identifiers in public proof payloads.
+- Keep credential signing keys out of source control.
+- Treat public verification responses as intentionally disclosed data only.
+- Keep Stellar mainnet disabled until contracts and security posture are reviewed.
+
+## Related Repositories
+
+- `earnproof-frontend`: Public app, worker dashboard, issuer UI, verifier UI, and admin UI.
+- `earnproof-contracts`: Soroban issuer registry, proof commitment registry, revocation state, and protocol configuration.
+- `earnproof-sdk`: Future TypeScript SDK for integrations.
+- `earnproof-specification`: Future credential and verification standard.
+

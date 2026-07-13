@@ -2,7 +2,7 @@
 
 NestJS API starter for EarnProof.
 
-## Phase 0 Included
+## Included Setup
 
 - NestJS application shell
 - Versioned `/api/v1` prefix

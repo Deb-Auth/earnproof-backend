@@ -120,6 +120,57 @@ export class PaymentsService {
     return payment;
   }
 
+  async updateClassification(
+    user: { id: string },
+    paymentId: string,
+    classification: PaymentClassification,
+  ) {
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        id: paymentId,
+        userId: user.id,
+      },
+      select: {
+        id: true,
+        classification: true,
+        assetCode: true,
+        assetIssuer: true,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException("Payment not found");
+    }
+
+    const updated = await this.prisma.payment.update({
+      where: {
+        id: payment.id,
+      },
+      data: {
+        classification,
+        isEligible: classification === PaymentClassification.INCOME,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        actorType: "user",
+        actorId: user.id,
+        action: "payment.classification.updated",
+        resourceType: "payment",
+        resourceId: payment.id,
+        metadata: {
+          previousClassification: payment.classification,
+          nextClassification: classification,
+          assetCode: payment.assetCode,
+          assetIssuer: payment.assetIssuer,
+        },
+      },
+    });
+
+    return updated;
+  }
+
   private assetKey(code: string, issuer: string | null) {
     return `${code}:${issuer ?? "native"}`;
   }

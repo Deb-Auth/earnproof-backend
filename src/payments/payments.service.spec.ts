@@ -52,4 +52,52 @@ describe("PaymentsService", () => {
       }),
     );
   });
+
+  it("updates classification and records an audit log", async () => {
+    const prisma = {
+      payment: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "payment_1",
+          classification: PaymentClassification.UNKNOWN,
+          assetCode: "XLM",
+          assetIssuer: null,
+        }),
+        update: jest.fn().mockResolvedValue({
+          id: "payment_1",
+          classification: PaymentClassification.INCOME,
+        }),
+      },
+      auditLog: {
+        create: jest.fn().mockResolvedValue({ id: "audit_1" }),
+      },
+    };
+    const service = new PaymentsService(prisma as never, {} as never);
+
+    await expect(
+      service.updateClassification(
+        { id: "user_1" },
+        "payment_1",
+        PaymentClassification.INCOME,
+      ),
+    ).resolves.toMatchObject({
+      id: "payment_1",
+      classification: PaymentClassification.INCOME,
+    });
+
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: "payment_1" },
+      data: {
+        classification: PaymentClassification.INCOME,
+        isEligible: true,
+      },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "payment.classification.updated",
+          actorId: "user_1",
+        }),
+      }),
+    );
+  });
 });

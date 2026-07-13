@@ -1,9 +1,19 @@
-import { Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AuthGuard } from "../common/guards/auth.guard";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { ListPaymentsDto } from "./dto/list-payments.dto";
+import { UpdatePaymentClassificationDto } from "./dto/update-payment-classification.dto";
 import { PaymentsService } from "./payments.service";
 
 @ApiBearerAuth()
@@ -32,5 +42,18 @@ export class PaymentsController {
     @Param("id") paymentId: string,
   ) {
     return this.paymentsService.getPayment(user.id, paymentId);
+  }
+
+  @Patch(":id/classification")
+  updateClassification(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") paymentId: string,
+    @Body() body: UpdatePaymentClassificationDto,
+  ) {
+    return this.paymentsService.updateClassification(
+      user,
+      paymentId,
+      body.classification,
+    );
   }
 }

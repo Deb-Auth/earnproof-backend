@@ -24,9 +24,10 @@
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.9",
     "@nestjs/platform-express": "^11.1.9",
-    "@nestjs/swagger": "^11.2.3",
+    "@nestjs/swagger": "11.4.6",
     "@prisma/client": "^6.19.3",
-    "@stellar/stellar-sdk": "^16.0.1",
+    "@stellar/stellar-base": "^15.0.0",
+    "@stellar/stellar-sdk": "16.2.0",
     "ajv": "^8.17.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
@@ -57,5 +58,8 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.67.0"
+  },
+  "overrides": {
+    "js-yaml": "5.2.3"
   }
 }

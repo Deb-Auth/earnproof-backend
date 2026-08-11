@@ -4,8 +4,8 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Keypair, StrKey } from "@stellar/stellar-sdk";
-import { randomBytes } from "crypto";
+import { Keypair, StrKey } from "@stellar/stellar-base";
+import { createHash, randomBytes } from "crypto";
 import { PrismaService } from "../database/prisma.service";
 import { sha256 } from "../common/crypto/hash";
 import { AuthTokenService } from "./auth-token.service";
@@ -164,9 +164,16 @@ export class AuthService {
   ) {
     const signatureBuffer = this.decodeSignature(signature);
     return Keypair.fromPublicKey(walletAddress).verify(
-      Buffer.from(message, "utf8"),
+      this.sep53MessageHash(message),
       signatureBuffer,
     );
+  }
+
+  private sep53MessageHash(message: string) {
+    return createHash("sha256")
+      .update("Stellar Signed Message:\n", "utf8")
+      .update(message, "utf8")
+      .digest();
   }
 
   private decodeSignature(signature: string) {

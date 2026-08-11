@@ -1,20 +1,12 @@
 import { ConfigService } from "@nestjs/config";
+import { Keypair } from "@stellar/stellar-base";
+import { createHash } from "crypto";
 import { AuthTokenService } from "./auth-token.service";
 import { AuthService } from "./auth.service";
 
-jest.mock("@stellar/stellar-sdk", () => ({
-  Keypair: {
-    fromPublicKey: jest.fn(() => ({
-      verify: jest.fn(() => true),
-    })),
-  },
-  StrKey: {
-    isValidEd25519PublicKey: jest.fn(() => true),
-  },
-}));
-
 describe("AuthService", () => {
-  const walletAddress = "G".padEnd(56, "A");
+  const keypair = Keypair.random();
+  const walletAddress = keypair.publicKey();
   const challenge = {
     id: "challenge_1",
     walletAddress,
@@ -64,12 +56,16 @@ describe("AuthService", () => {
     });
   });
 
-  it("verifies signatures and returns bearer session", async () => {
+  it("verifies SEP-53 signatures and returns bearer session", async () => {
+    const signature = keypair
+      .sign(sep53MessageHash(challenge.message))
+      .toString("base64");
+
     await expect(
       service.verifyChallenge({
         challengeId: challenge.id,
         walletAddress,
-        signature: Buffer.from("signature").toString("base64"),
+        signature,
       }),
     ).resolves.toMatchObject({
       user: {
@@ -81,4 +77,25 @@ describe("AuthService", () => {
       },
     });
   });
+
+  it("rejects raw-message signatures that do not follow SEP-53", async () => {
+    const signature = keypair
+      .sign(Buffer.from(challenge.message, "utf8"))
+      .toString("base64");
+
+    await expect(
+      service.verifyChallenge({
+        challengeId: challenge.id,
+        walletAddress,
+        signature,
+      }),
+    ).rejects.toThrow("Invalid wallet signature");
+  });
 });
+
+function sep53MessageHash(message: string) {
+  return createHash("sha256")
+    .update("Stellar Signed Message:\n", "utf8")
+    .update(message, "utf8")
+    .digest();
+}

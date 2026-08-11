@@ -20,7 +20,7 @@ Implemented:
 - Swagger documentation at `/docs`
 - Health endpoint at `/api/v1/health`
 - Wallet challenge generation at `/api/v1/auth/challenge`
-- Freighter-compatible challenge verification at `/api/v1/auth/verify`
+- Freighter-compatible SEP-53 challenge verification at `/api/v1/auth/verify`
 - Bearer-token session lookup and logout endpoints
 - Incoming Stellar testnet payment synchronization at `/api/v1/payments/sync`
 - Authenticated payment listing, detail lookup, and manual classification
@@ -28,7 +28,8 @@ Implemented:
 - Public proof verification at `/api/v1/proofs/:id/verify`
 - Authenticated proof revocation at `/api/v1/proofs/:id/revoke`
 - Deterministic credential canonicalization, hashing, and HMAC signing
-- Optional Stellar CLI proof commitment anchoring for deployed proof registry contracts
+- AES-256-GCM protection for indexed payment amounts
+- Optional Stellar CLI proof commitment anchoring, revocation, and public status checks for deployed proof registry contracts
 - PostgreSQL and Redis Docker Compose services
 - Prisma lifecycle service
 - Prisma schema for core product entities
@@ -138,6 +139,7 @@ STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 SESSION_SECRET=replace_me
 CREDENTIAL_SIGNING_SECRET=replace_me
+PAYMENT_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 CONTRACT_ANCHORING_ENABLED=false
 CONTRACT_ANCHORING_REQUIRED=false
 STELLAR_CLI_PATH=stellar
@@ -158,6 +160,7 @@ npm run prisma:generate
 npm run lint
 npm run test
 npm run build
+npm audit --omit=dev
 ```
 
 Prisma validation:
@@ -171,12 +174,14 @@ npx prisma validate
 
 - Do not log raw wallet signatures.
 - Do not log exact income values.
+- Protect stored payment amounts with `PAYMENT_ENCRYPTION_KEY`.
 - Do not expose selected source transactions to verifiers.
 - Store API keys as hashes only.
 - Store webhook secrets as hashes or encrypted values.
 - Hash wallet identifiers in public proof payloads.
 - Keep credential signing keys out of source control.
 - Treat public verification responses as intentionally disclosed data only.
+- Keep backend revocation and public verification aligned with contract status when anchoring is enabled.
 - Keep Stellar mainnet disabled until contracts and security posture are reviewed.
 
 ## Related Repositories

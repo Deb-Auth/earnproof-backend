@@ -1,0 +1,33 @@
+name: Contributor task
+description: Scoped implementation work for contributors
+title: "[Task]: "
+labels: ["type: task", "status: needs triage"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Explain why this work matters.
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Suggested implementation
+      description: Include files, constraints, schemas, and relevant interfaces.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List concrete completion checks.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Commands, tests, or fixtures required.
+    validations:
+      required: true

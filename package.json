@@ -2,12 +2,17 @@
   "name": "earnproof-backend",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "EarnProof API service for Stellar income proof generation and verification.",
+  "engines": {
+    "node": ">=20.11.1",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\"",
     "test": "jest",
     "test:watch": "jest --watch",
     "prisma:generate": "prisma generate",
@@ -50,6 +55,7 @@
     "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
   }
 }

@@ -135,6 +135,7 @@ export class PaymentsService {
         classification: true,
         assetCode: true,
         assetIssuer: true,
+        isEligible: true,
       },
     });
 
@@ -148,7 +149,6 @@ export class PaymentsService {
       },
       data: {
         classification,
-        isEligible: classification === PaymentClassification.INCOME,
       },
     });
 
@@ -164,6 +164,7 @@ export class PaymentsService {
           nextClassification: classification,
           assetCode: payment.assetCode,
           assetIssuer: payment.assetIssuer,
+          isEligible: payment.isEligible,
         },
       },
     });

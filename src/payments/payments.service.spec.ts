@@ -61,6 +61,7 @@ describe("PaymentsService", () => {
           classification: PaymentClassification.UNKNOWN,
           assetCode: "XLM",
           assetIssuer: null,
+          isEligible: true,
         }),
         update: jest.fn().mockResolvedValue({
           id: "payment_1",
@@ -88,7 +89,6 @@ describe("PaymentsService", () => {
       where: { id: "payment_1" },
       data: {
         classification: PaymentClassification.INCOME,
-        isEligible: true,
       },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith(
@@ -99,5 +99,45 @@ describe("PaymentsService", () => {
         }),
       }),
     );
+  });
+
+  it("does not make unsupported assets eligible during classification", async () => {
+    const prisma = {
+      payment: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "payment_unsupported",
+          classification: PaymentClassification.UNKNOWN,
+          assetCode: "FAKE",
+          assetIssuer: "GISSUER",
+          isEligible: false,
+        }),
+        update: jest.fn().mockResolvedValue({
+          id: "payment_unsupported",
+          classification: PaymentClassification.INCOME,
+          isEligible: false,
+        }),
+      },
+      auditLog: {
+        create: jest.fn().mockResolvedValue({ id: "audit_2" }),
+      },
+    };
+    const service = new PaymentsService(prisma as never, {} as never);
+
+    const updated = await service.updateClassification(
+      { id: "user_1" },
+      "payment_unsupported",
+      PaymentClassification.INCOME,
+    );
+
+    expect(updated).toMatchObject({
+      classification: PaymentClassification.INCOME,
+      isEligible: false,
+    });
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: "payment_unsupported" },
+      data: {
+        classification: PaymentClassification.INCOME,
+      },
+    });
   });
 });

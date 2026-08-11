@@ -242,6 +242,7 @@ export class ProofsService {
         id: true,
         userId: true,
         status: true,
+        contractTransactionHash: true,
       },
     });
 
@@ -252,6 +253,10 @@ export class ProofsService {
     if (proof.userId !== userId) {
       throw new ForbiddenException("Proof does not belong to this user");
     }
+
+    const contractRevocation = proof.contractTransactionHash
+      ? await this.contractAnchoringService?.revokeProof(proof.id)
+      : undefined;
 
     const updated = await this.prisma.proof.update({
       where: {
@@ -268,7 +273,13 @@ export class ProofsService {
       },
     });
 
-    return updated;
+    return {
+      ...updated,
+      anchoring: contractRevocation ?? {
+        anchored: false,
+        reason: "disabled",
+      },
+    };
   }
 
   async verifyProof(proofId: string) {
@@ -319,6 +330,18 @@ export class ProofsService {
       result = VerificationResult.INVALID_SIGNATURE;
     }
 
+    const contractStatus = proof.contractTransactionHash
+      ? await this.contractAnchoringService?.getProofStatus(proof.id)
+      : undefined;
+
+    if (contractStatus?.checked) {
+      if (contractStatus.revoked) {
+        result = VerificationResult.REVOKED;
+      } else if (result === VerificationResult.VALID && !contractStatus.valid) {
+        result = VerificationResult.INVALID_SIGNATURE;
+      }
+    }
+
     await this.prisma.verificationEvent.create({
       data: {
         proofId: proof.id,
@@ -338,6 +361,10 @@ export class ProofsService {
         issuedAt: proof.createdAt.toISOString(),
         expiresAt: proof.expiresAt.toISOString(),
         revokedAt: proof.revokedAt?.toISOString() ?? null,
+        contractStatus: contractStatus ?? {
+          checked: false,
+          reason: "disabled",
+        },
       },
     };
   }

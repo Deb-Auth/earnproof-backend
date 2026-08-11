@@ -23,6 +23,18 @@ export type AnchorProofResult =
       error?: string;
     };
 
+export type ContractProofStatus =
+  | {
+      checked: true;
+      revoked: boolean;
+      valid: boolean;
+    }
+  | {
+      checked: false;
+      reason: "disabled" | "failed";
+      error?: string;
+    };
+
 @Injectable()
 export class ContractAnchoringService {
   private readonly logger = new Logger(ContractAnchoringService.name);
@@ -107,6 +119,118 @@ export class ContractAnchoringService {
     }
   }
 
+  async revokeProof(proofId: string): Promise<AnchorProofResult> {
+    if (!this.enabled || !this.hasRequiredConfig()) {
+      return {
+        anchored: false,
+        reason: "disabled",
+      };
+    }
+
+    return this.invokeMutation("revoke_proof", [
+      "--proof_id_hash",
+      sha256(proofId),
+    ]);
+  }
+
+  async getProofStatus(proofId: string): Promise<ContractProofStatus> {
+    if (!this.enabled || !this.hasRequiredConfig()) {
+      return {
+        checked: false,
+        reason: "disabled",
+      };
+    }
+
+    try {
+      const [revoked, valid] = await Promise.all([
+        this.invokeRead("is_revoked", ["--proof_id_hash", sha256(proofId)]),
+        this.invokeRead("is_valid_proof", ["--proof_id_hash", sha256(proofId)]),
+      ]);
+
+      return {
+        checked: true,
+        revoked: this.parseBoolean(revoked),
+        valid: this.parseBoolean(valid),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      if (this.required) {
+        throw error;
+      }
+
+      this.logger.warn(`Contract status check failed: ${message}`);
+      return {
+        checked: false,
+        reason: "failed",
+        error: message,
+      };
+    }
+  }
+
+  private async invokeMutation(functionName: string, functionArgs: string[]) {
+    try {
+      const { stdout } = await execFileAsync(
+        this.stellarCliPath,
+        this.contractInvokeArgs(functionName, functionArgs, true),
+        {
+          windowsHide: true,
+          timeout: 120_000,
+        },
+      );
+      return {
+        anchored: true as const,
+        transactionHash: this.lastOutputLine(stdout),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      if (this.required) {
+        throw error;
+      }
+
+      this.logger.warn(`Contract mutation failed: ${message}`);
+      return {
+        anchored: false as const,
+        reason: "failed" as const,
+        error: message,
+      };
+    }
+  }
+
+  private async invokeRead(functionName: string, functionArgs: string[]) {
+    const { stdout } = await execFileAsync(
+      this.stellarCliPath,
+      this.contractInvokeArgs(functionName, functionArgs, false),
+      {
+        windowsHide: true,
+        timeout: 60_000,
+      },
+    );
+    return this.lastOutputLine(stdout);
+  }
+
+  private contractInvokeArgs(
+    functionName: string,
+    functionArgs: string[],
+    includeSource: boolean,
+  ) {
+    const args = ["contract", "invoke"];
+    if (includeSource) {
+      args.push("--source", this.source!);
+    }
+
+    args.push(
+      "--network",
+      this.network,
+      "--id",
+      this.proofRegistryContractId!,
+      "--",
+      functionName,
+      ...functionArgs,
+    );
+
+    return args;
+  }
+
   private hasRequiredConfig() {
     return Boolean(
       this.source && this.proofRegistryContractId && this.issuerAddress,
@@ -128,5 +252,9 @@ export class ContractAnchoringService {
       .map((line) => line.trim())
       .filter(Boolean);
     return lines.at(-1) ?? "";
+  }
+
+  private parseBoolean(value: string) {
+    return value.trim().toLowerCase() === "true";
   }
 }

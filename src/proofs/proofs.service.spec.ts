@@ -207,6 +207,129 @@ describe("ProofsService", () => {
       },
     });
   });
+
+  it("revokes anchored proofs on-chain when contract anchoring is available", async () => {
+    const prisma = {
+      proof: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: "proof_anchored",
+          userId: "user_1",
+          status: ProofStatus.ACTIVE,
+          contractTransactionHash: "tx_register",
+        }),
+        update: jest.fn().mockResolvedValue({
+          id: "proof_anchored",
+          status: ProofStatus.REVOKED,
+          revokedAt: new Date("2026-08-04T00:00:00.000Z"),
+        }),
+      },
+    };
+    const anchoring = {
+      revokeProof: jest.fn().mockResolvedValue({
+        anchored: true,
+        transactionHash: "tx_revoke",
+      }),
+    };
+    const service = new ProofsService(
+      prisma as never,
+      config as never,
+      anchoring as never,
+    );
+
+    await expect(service.revokeProof("user_1", "proof_anchored")).resolves.toEqual(
+      expect.objectContaining({
+        id: "proof_anchored",
+        anchoring: {
+          anchored: true,
+          transactionHash: "tx_revoke",
+        },
+      }),
+    );
+    expect(anchoring.revokeProof).toHaveBeenCalledWith("proof_anchored");
+  });
+
+  it("uses revoked on-chain status during public verification", async () => {
+    const credential = {
+      id: "proof_onchain_revoked",
+      type: "EarnProofMinimumIncomeCredential",
+      schemaVersion: "earnproof.minimum-income.v1",
+      issuer: "earnproof-backend",
+      subject: {
+        walletHash: "sha256:wallet",
+      },
+      claim: {
+        operator: "gte",
+        thresholdAmount: "100",
+        assetCode: "XLM",
+        assetIssuer: null,
+        periodStart: "2026-08-01T00:00:00.000Z",
+        periodEnd: "2026-08-31T23:59:59.000Z",
+        qualifyingPaymentCount: 1,
+      },
+      privacy: {
+        exactIncomeHidden: true,
+        sourceTransactionsHidden: true,
+      },
+      issuedAt: "2026-08-02T00:00:00.000Z",
+      expiresAt: "2026-09-01T00:00:00.000Z",
+    };
+    const prisma = {
+      proof: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: "proof_onchain_revoked",
+          proofType: ProofType.MINIMUM_INCOME,
+          schemaVersion: "earnproof.minimum-income.v1",
+          status: ProofStatus.ACTIVE,
+          network: "testnet",
+          assetCode: "XLM",
+          assetIssuer: null,
+          periodStart: new Date("2026-08-01T00:00:00.000Z"),
+          periodEnd: new Date("2026-08-31T23:59:59.000Z"),
+          expiresAt: new Date("2026-09-01T00:00:00.000Z"),
+          revokedAt: null,
+          createdAt: new Date("2026-08-02T00:00:00.000Z"),
+          credentialHash: `sha256:${sha256(canonicalize(credential))}`,
+          contractTransactionHash: "tx_register",
+          user: {
+            walletHash: "sha256:wallet",
+          },
+          claim: {
+            thresholdEncrypted: `redacted:${Buffer.from("100").toString(
+              "base64url",
+            )}`,
+            disclosurePolicy: {
+              qualifyingPaymentCount: 1,
+            },
+          },
+        }),
+      },
+      verificationEvent: {
+        create: jest.fn().mockResolvedValue({ id: "event_1" }),
+      },
+    };
+    const anchoring = {
+      getProofStatus: jest.fn().mockResolvedValue({
+        checked: true,
+        revoked: true,
+        valid: false,
+      }),
+    };
+    const service = new ProofsService(
+      prisma as never,
+      config as never,
+      anchoring as never,
+    );
+
+    const result = await service.verifyProof("proof_onchain_revoked");
+
+    expect(result.result).toBe(VerificationResult.REVOKED);
+    expect(result.status).toBe("revoked");
+    expect(result.proof?.contractStatus).toEqual({
+      checked: true,
+      revoked: true,
+      valid: false,
+    });
+  });
 });
 
 function canonicalize(value: unknown): string {

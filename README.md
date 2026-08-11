@@ -2,7 +2,7 @@
 
 EarnProof is an open-source, privacy-focused income and payment verification protocol built on Stellar.
 
-This repository contains the NestJS API responsible for wallet authentication, Stellar payment indexing, proof condition evaluation, credential signing, verification, revocation, issuer management, webhooks, API keys, audit logs, and operational health.
+This repository contains the NestJS API for wallet authentication, Stellar payment indexing, payment classification, and operational health. Proof condition evaluation, credential signing, verification, revocation, issuer management, webhooks, API keys, and audit logs are planned but not yet wired into the application.
 
 ## Product Role
 
@@ -19,12 +19,17 @@ Implemented:
 - Environment validation
 - Swagger documentation at `/docs`
 - Health endpoint at `/api/v1/health`
+- Wallet challenge generation at `/api/v1/auth/challenge`
+- Freighter-compatible challenge verification at `/api/v1/auth/verify`
+- Bearer-token session lookup and logout endpoints
+- Incoming Stellar testnet payment synchronization at `/api/v1/payments/sync`
+- Authenticated payment listing, detail lookup, and manual classification
 - PostgreSQL and Redis Docker Compose services
 - Prisma lifecycle service
 - Prisma schema for core product entities
 - Initial database migration
 - Seed script for native XLM testnet asset
-- Jest setup
+- Jest tests for auth, token handling, health, Stellar payment mapping, and payment sync/classification
 
 Core entities currently modeled:
 
@@ -45,15 +50,13 @@ Core entities currently modeled:
 
 Planned next:
 
-- Wallet challenge generation
-- Freighter-compatible signature verification
-- Session handling
-- Stellar testnet payment synchronization
-- Payment classification endpoints
 - Proof generation
 - Credential signing and verification
 - Public verification endpoints
 - Revocation workflow
+- Issuer management
+- Webhooks and API keys
+- Contract anchoring
 
 ## Tech Stack
 
@@ -62,8 +65,8 @@ Planned next:
 - PostgreSQL
 - Prisma
 - Redis
-- BullMQ, planned
-- Stellar JavaScript SDK, planned
+- Stellar JavaScript SDK
+- BullMQ, planned for background jobs
 - OpenAPI/Swagger
 - Jest
 - Docker Compose
@@ -74,10 +77,13 @@ Planned next:
 src/
   app.module.ts
   main.ts
+  auth/
   config/
+  common/
   database/
   health/
-  common/
+  payments/
+  stellar/
 prisma/
   schema.prisma
   seed.ts
@@ -136,6 +142,8 @@ Use strong secrets outside local development. Do not commit `.env`.
 ## Validation
 
 ```bash
+npm run prisma:generate
+npm run lint
 npm run test
 npm run build
 ```
@@ -165,4 +173,3 @@ npx prisma validate
 - `earnproof-contracts`: Soroban issuer registry, proof commitment registry, revocation state, and protocol configuration.
 - `earnproof-sdk`: Future TypeScript SDK for integrations.
 - `earnproof-specification`: Future credential and verification standard.
-

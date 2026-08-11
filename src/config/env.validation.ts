@@ -3,6 +3,13 @@ import { z } from "zod";
 const optionalString = (schema: z.ZodString) =>
   z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
 
+const encryptionKey = z.string().refine((value) => {
+  const key = /^[a-fA-F0-9]{64}$/.test(value)
+    ? Buffer.from(value, "hex")
+    : Buffer.from(value, "base64");
+  return key.length === 32;
+}, "PAYMENT_ENCRYPTION_KEY must be 32 bytes encoded as base64 or hex");
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -17,6 +24,7 @@ const envSchema = z.object({
   STELLAR_NETWORK_PASSPHRASE: z.string().min(1),
   SESSION_SECRET: z.string().min(8),
   CREDENTIAL_SIGNING_SECRET: z.string().min(8),
+  PAYMENT_ENCRYPTION_KEY: encryptionKey,
   CONTRACT_ANCHORING_ENABLED: z
     .enum(["true", "false"])
     .optional()

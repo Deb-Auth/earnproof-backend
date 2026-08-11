@@ -2,6 +2,15 @@ import { PaymentClassification, ResourceStatus } from "@prisma/client";
 import { PaymentsService } from "./payments.service";
 
 describe("PaymentsService", () => {
+  const config = {
+    getOrThrow: jest.fn((key: string) => {
+      const values: Record<string, string> = {
+        paymentEncryptionKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+      };
+      return values[key];
+    }),
+  };
+
   it("syncs incoming payments idempotently", async () => {
     const prisma = {
       supportedAsset: {
@@ -28,7 +37,11 @@ describe("PaymentsService", () => {
         },
       ]),
     };
-    const service = new PaymentsService(prisma as never, stellar as never);
+    const service = new PaymentsService(
+      prisma as never,
+      stellar as never,
+      config as never,
+    );
 
     await expect(
       service.syncPayments({ id: "user_1", walletAddress: "GB" }),
@@ -48,6 +61,7 @@ describe("PaymentsService", () => {
         create: expect.objectContaining({
           classification: PaymentClassification.UNKNOWN,
           isEligible: true,
+          amountEncrypted: expect.stringMatching(/^enc:v1:/),
         }),
       }),
     );
@@ -72,7 +86,11 @@ describe("PaymentsService", () => {
         create: jest.fn().mockResolvedValue({ id: "audit_1" }),
       },
     };
-    const service = new PaymentsService(prisma as never, {} as never);
+    const service = new PaymentsService(
+      prisma as never,
+      {} as never,
+      config as never,
+    );
 
     await expect(
       service.updateClassification(
@@ -121,7 +139,11 @@ describe("PaymentsService", () => {
         create: jest.fn().mockResolvedValue({ id: "audit_2" }),
       },
     };
-    const service = new PaymentsService(prisma as never, {} as never);
+    const service = new PaymentsService(
+      prisma as never,
+      {} as never,
+      config as never,
+    );
 
     const updated = await service.updateClassification(
       { id: "user_1" },

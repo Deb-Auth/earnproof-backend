@@ -16,6 +16,7 @@ import {
 import { createHmac, randomUUID } from "crypto";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { sha256 } from "../common/crypto/hash";
+import { decryptProtectedAmount } from "../common/crypto/protected-amount";
 import { PrismaService } from "../database/prisma.service";
 import { ContractAnchoringService } from "./contract-anchoring.service";
 import { CreateMinimumIncomeProofDto } from "./dto/create-minimum-income-proof.dto";
@@ -51,6 +52,7 @@ type MinimumIncomeCredential = {
 @Injectable()
 export class ProofsService {
   private readonly signingSecret: string;
+  private readonly paymentEncryptionKey: string;
   private readonly stellarNetwork: string;
 
   constructor(
@@ -61,6 +63,9 @@ export class ProofsService {
   ) {
     this.signingSecret = configService.getOrThrow<string>(
       "credentialSigningSecret",
+    );
+    this.paymentEncryptionKey = configService.getOrThrow<string>(
+      "paymentEncryptionKey",
     );
     this.stellarNetwork = configService.getOrThrow<string>("stellar.network");
   }
@@ -444,15 +449,17 @@ export class ProofsService {
   }
 
   private revealProtectedAmount(amountEncrypted: string | null) {
-    if (!amountEncrypted?.startsWith("redacted:")) {
+    if (!amountEncrypted) {
       throw new BadRequestException("Selected payment amount is unavailable");
     }
 
-    return this.parseAmount(
-      Buffer.from(amountEncrypted.slice("redacted:".length), "base64url").toString(
-        "utf8",
-      ),
-    );
+    try {
+      return this.parseAmount(
+        decryptProtectedAmount(amountEncrypted, this.paymentEncryptionKey),
+      );
+    } catch {
+      throw new BadRequestException("Selected payment amount is unavailable");
+    }
   }
 
   private revealThreshold(thresholdEncrypted: string | null) {

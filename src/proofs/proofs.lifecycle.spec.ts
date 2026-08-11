@@ -13,6 +13,7 @@ describe("ProofsService lifecycle", () => {
       getOrThrow: jest.fn((key: string) => {
         const values: Record<string, string> = {
           credentialSigningSecret: "lifecycle-signing-secret",
+          paymentEncryptionKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
           "stellar.network": "testnet",
         };
         return values[key];

@@ -1,14 +1,23 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PaymentClassification, ResourceStatus } from "@prisma/client";
+import { encryptProtectedAmount } from "../common/crypto/protected-amount";
 import { PrismaService } from "../database/prisma.service";
 import { StellarService } from "../stellar/stellar.service";
 
 @Injectable()
 export class PaymentsService {
+  private readonly paymentEncryptionKey: string;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly stellarService: StellarService,
-  ) {}
+    configService: ConfigService,
+  ) {
+    this.paymentEncryptionKey = configService.getOrThrow<string>(
+      "paymentEncryptionKey",
+    );
+  }
 
   async syncPayments(user: { id: string; walletAddress: string }) {
     const incomingPayments = await this.stellarService.fetchIncomingPayments(
@@ -177,6 +186,6 @@ export class PaymentsService {
   }
 
   private protectAmount(amount: string) {
-    return `redacted:${Buffer.from(amount).toString("base64url")}`;
+    return encryptProtectedAmount(amount, this.paymentEncryptionKey);
   }
 }

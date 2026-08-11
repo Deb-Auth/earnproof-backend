@@ -1,0 +1,231 @@
+import {
+  PaymentClassification,
+  ProofStatus,
+  ProofType,
+  VerificationResult,
+} from "@prisma/client";
+import { sha256 } from "../common/crypto/hash";
+import { ProofsService } from "./proofs.service";
+
+describe("ProofsService", () => {
+  const config = {
+    getOrThrow: jest.fn((key: string) => {
+      const values: Record<string, string> = {
+        credentialSigningSecret: "test-signing-secret",
+        "stellar.network": "testnet",
+      };
+      return values[key];
+    }),
+  };
+
+  const user = {
+    id: "user_1",
+    walletAddress: "GB_TEST",
+    walletHash: "sha256:wallet",
+    role: "WORKER",
+  };
+
+  it("creates a signed minimum income proof without disclosing exact income", async () => {
+    const prisma = {
+      payment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "payment_1",
+            assetCode: "XLM",
+            assetIssuer: null,
+            amountEncrypted: `redacted:${Buffer.from("125.50").toString(
+              "base64url",
+            )}`,
+            classification: PaymentClassification.INCOME,
+            isEligible: true,
+            occurredAt: new Date("2026-08-01T00:00:00.000Z"),
+          },
+        ]),
+      },
+      proof: {
+        create: jest.fn().mockImplementation(({ data }) => ({
+          id: data.id,
+          userId: data.userId,
+          proofType: data.proofType,
+          schemaVersion: data.schemaVersion,
+          status: data.status,
+          network: data.network,
+          assetCode: data.assetCode,
+          assetIssuer: data.assetIssuer,
+          periodStart: data.periodStart,
+          periodEnd: data.periodEnd,
+          expiresAt: data.expiresAt,
+          credentialHash: data.credentialHash,
+          commitment: data.commitment,
+          createdAt: new Date("2026-08-02T00:00:00.000Z"),
+          claim: data.claim.create,
+        })),
+      },
+    };
+    const service = new ProofsService(prisma as never, config as never);
+
+    const result = await service.createMinimumIncomeProof(user, {
+      selectedPaymentIds: ["payment_1"],
+      thresholdAmount: "100",
+      assetCode: "XLM",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.000Z",
+      expiresInDays: 10,
+    });
+
+    expect(result.status).toBe(ProofStatus.ACTIVE);
+    expect(result.credential.claim.thresholdAmount).toBe("100");
+    expect(result.credential.claim.qualifyingPaymentCount).toBe(1);
+    expect(JSON.stringify(result)).not.toContain("125.50");
+    expect(JSON.stringify(result)).not.toContain("payment_1");
+    expect(result.credential.proof.signature).toMatch(/^hmac-sha256:/);
+    expect(prisma.proof.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          proofType: ProofType.MINIMUM_INCOME,
+          credentialHash: expect.stringMatching(/^sha256:/),
+          commitment: expect.stringMatching(/^sha256:/),
+        }),
+      }),
+    );
+  });
+
+  it("rejects selected payments below the requested threshold", async () => {
+    const prisma = {
+      payment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "payment_1",
+            assetCode: "XLM",
+            assetIssuer: null,
+            amountEncrypted: `redacted:${Buffer.from("25").toString(
+              "base64url",
+            )}`,
+            classification: PaymentClassification.INCOME,
+            isEligible: true,
+            occurredAt: new Date("2026-08-01T00:00:00.000Z"),
+          },
+        ]),
+      },
+    };
+    const service = new ProofsService(prisma as never, config as never);
+
+    await expect(
+      service.createMinimumIncomeProof(user, {
+        selectedPaymentIds: ["payment_1"],
+        thresholdAmount: "100",
+        assetCode: "XLM",
+        periodStart: "2026-08-01T00:00:00.000Z",
+        periodEnd: "2026-08-31T23:59:59.000Z",
+      }),
+    ).rejects.toThrow("minimum income threshold");
+  });
+
+  it("returns an unknown public verification state for missing proofs", async () => {
+    const prisma = {
+      proof: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+    };
+    const service = new ProofsService(prisma as never, config as never);
+
+    await expect(service.verifyProof("missing")).resolves.toEqual({
+      result: VerificationResult.UNKNOWN_PROOF,
+      status: "unknown",
+    });
+  });
+
+  it("returns a revoked public verification state", async () => {
+    const credential = {
+      id: "proof_1",
+      type: "EarnProofMinimumIncomeCredential",
+      schemaVersion: "earnproof.minimum-income.v1",
+      issuer: "earnproof-backend",
+      subject: {
+        walletHash: "sha256:wallet",
+      },
+      claim: {
+        operator: "gte",
+        thresholdAmount: "100",
+        assetCode: "XLM",
+        assetIssuer: null,
+        periodStart: "2026-08-01T00:00:00.000Z",
+        periodEnd: "2026-08-31T23:59:59.000Z",
+        qualifyingPaymentCount: 1,
+      },
+      privacy: {
+        exactIncomeHidden: true,
+        sourceTransactionsHidden: true,
+      },
+      issuedAt: "2026-08-02T00:00:00.000Z",
+      expiresAt: "2026-09-01T00:00:00.000Z",
+    };
+    const prisma = {
+      proof: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: "proof_1",
+          proofType: ProofType.MINIMUM_INCOME,
+          schemaVersion: "earnproof.minimum-income.v1",
+          status: ProofStatus.REVOKED,
+          network: "testnet",
+          assetCode: "XLM",
+          assetIssuer: null,
+          periodStart: new Date("2026-08-01T00:00:00.000Z"),
+          periodEnd: new Date("2026-08-31T23:59:59.000Z"),
+          expiresAt: new Date("2026-09-01T00:00:00.000Z"),
+          revokedAt: new Date("2026-08-03T00:00:00.000Z"),
+          createdAt: new Date("2026-08-02T00:00:00.000Z"),
+          credentialHash: `sha256:${sha256(canonicalize(credential))}`,
+          user: {
+            walletHash: "sha256:wallet",
+          },
+          claim: {
+            thresholdEncrypted: `redacted:${Buffer.from("100").toString(
+              "base64url",
+            )}`,
+            disclosurePolicy: {
+              qualifyingPaymentCount: 1,
+            },
+          },
+        }),
+      },
+      verificationEvent: {
+        create: jest.fn().mockResolvedValue({ id: "event_1" }),
+      },
+    };
+    const service = new ProofsService(prisma as never, config as never);
+
+    const result = await service.verifyProof("proof_1");
+
+    expect(result.result).toBe(VerificationResult.REVOKED);
+    expect(result.status).toBe("revoked");
+    expect(prisma.verificationEvent.create).toHaveBeenCalledWith({
+      data: {
+        proofId: "proof_1",
+        result: VerificationResult.REVOKED,
+      },
+    });
+  });
+});
+
+function canonicalize(value: unknown): string {
+  return JSON.stringify(sortObject(value));
+}
+
+function sortObject(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortObject(item));
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((sorted, key) => {
+        sorted[key] = sortObject(record[key]);
+        return sorted;
+      }, {});
+  }
+
+  return value;
+}

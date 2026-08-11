@@ -167,6 +167,7 @@ export class ProofsService {
         periodStart,
         periodEnd,
         expiresAt,
+        createdAt: now,
         credentialHash,
         commitment: `sha256:${sha256(credentialHash)}`,
         claim: {

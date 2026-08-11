@@ -57,7 +57,7 @@ describe("ProofsService", () => {
           expiresAt: data.expiresAt,
           credentialHash: data.credentialHash,
           commitment: data.commitment,
-          createdAt: new Date("2026-08-02T00:00:00.000Z"),
+          createdAt: data.createdAt,
           claim: data.claim.create,
         })),
       },
@@ -85,6 +85,7 @@ describe("ProofsService", () => {
           proofType: ProofType.MINIMUM_INCOME,
           credentialHash: expect.stringMatching(/^sha256:/),
           commitment: expect.stringMatching(/^sha256:/),
+          createdAt: expect.any(Date),
         }),
       }),
     );

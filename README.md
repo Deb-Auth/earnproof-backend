@@ -2,7 +2,7 @@
 
 EarnProof is an open-source, privacy-focused income and payment verification protocol built on Stellar.
 
-This repository contains the NestJS API for wallet authentication, Stellar payment indexing, payment classification, and operational health. Proof condition evaluation, credential signing, verification, revocation, issuer management, webhooks, API keys, and audit logs are planned but not yet wired into the application.
+This repository contains the NestJS API for wallet authentication, Stellar payment indexing, payment classification, minimum-income proof issuance, public proof verification, proof revocation, and operational health. Issuer management, webhooks, API keys, audit-log expansion, and contract anchoring are planned but not yet wired into the application.
 
 ## Product Role
 
@@ -24,12 +24,16 @@ Implemented:
 - Bearer-token session lookup and logout endpoints
 - Incoming Stellar testnet payment synchronization at `/api/v1/payments/sync`
 - Authenticated payment listing, detail lookup, and manual classification
+- Minimum-income proof creation at `/api/v1/proofs/minimum-income`
+- Public proof verification at `/api/v1/proofs/:id/verify`
+- Authenticated proof revocation at `/api/v1/proofs/:id/revoke`
+- Deterministic credential canonicalization, hashing, and HMAC signing
 - PostgreSQL and Redis Docker Compose services
 - Prisma lifecycle service
 - Prisma schema for core product entities
 - Initial database migration
 - Seed script for native XLM testnet asset
-- Jest tests for auth, token handling, health, Stellar payment mapping, and payment sync/classification
+- Jest tests for auth, token handling, health, Stellar payment mapping, payment sync/classification, and proof issuance/verification states
 
 Core entities currently modeled:
 
@@ -50,13 +54,11 @@ Core entities currently modeled:
 
 Planned next:
 
-- Proof generation
-- Credential signing and verification
-- Public verification endpoints
-- Revocation workflow
 - Issuer management
 - Webhooks and API keys
 - Contract anchoring
+- Database-backed verification event enrichment
+- End-to-end API tests with a test database
 
 ## Tech Stack
 
@@ -83,6 +85,7 @@ src/
   database/
   health/
   payments/
+  proofs/
   stellar/
 prisma/
   schema.prisma

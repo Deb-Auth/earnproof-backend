@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const optionalString = (schema: z.ZodString) =>
+  z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -14,6 +17,23 @@ const envSchema = z.object({
   STELLAR_NETWORK_PASSPHRASE: z.string().min(1),
   SESSION_SECRET: z.string().min(8),
   CREDENTIAL_SIGNING_SECRET: z.string().min(8),
+  CONTRACT_ANCHORING_ENABLED: z
+    .enum(["true", "false"])
+    .optional()
+    .default("false"),
+  CONTRACT_ANCHORING_REQUIRED: z
+    .enum(["true", "false"])
+    .optional()
+    .default("false"),
+  STELLAR_CLI_PATH: optionalString(z.string().min(1)),
+  STELLAR_CLI_SOURCE: optionalString(z.string().min(1)),
+  PROOF_REGISTRY_CONTRACT_ID: optionalString(
+    z.string().regex(/^C[A-Z2-7]{55}$/),
+  ),
+  EARNPROOF_ISSUER_ADDRESS: optionalString(
+    z.string().regex(/^G[A-Z2-7]{55}$/),
+  ),
+  EARNPROOF_SCHEMA_VERSION: z.coerce.number().int().positive().optional(),
 });
 
 export function validateEnv(config: Record<string, unknown>) {

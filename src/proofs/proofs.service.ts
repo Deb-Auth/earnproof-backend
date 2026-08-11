@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Optional,
   NotFoundException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -16,6 +17,7 @@ import { createHmac, randomUUID } from "crypto";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { sha256 } from "../common/crypto/hash";
 import { PrismaService } from "../database/prisma.service";
+import { ContractAnchoringService } from "./contract-anchoring.service";
 import { CreateMinimumIncomeProofDto } from "./dto/create-minimum-income-proof.dto";
 
 const SCHEMA_VERSION = "earnproof.minimum-income.v1";
@@ -54,6 +56,8 @@ export class ProofsService {
   constructor(
     private readonly prisma: PrismaService,
     configService: ConfigService,
+    @Optional()
+    private readonly contractAnchoringService?: ContractAnchoringService,
   ) {
     this.signingSecret = configService.getOrThrow<string>(
       "credentialSigningSecret",
@@ -200,12 +204,32 @@ export class ProofsService {
       issuedAt: proof.createdAt,
       expiresAt: proof.expiresAt,
     });
+    const anchorResult = await this.contractAnchoringService?.anchorProof({
+      proofId: proof.id,
+      commitment: proof.commitment ?? credentialHash,
+      expiresAt: proof.expiresAt,
+    });
+
+    if (anchorResult?.anchored) {
+      await this.prisma.proof.update({
+        where: {
+          id: proof.id,
+        },
+        data: {
+          contractTransactionHash: anchorResult.transactionHash,
+        },
+      });
+    }
 
     return {
       proofId: proof.id,
       status: proof.status,
       verificationUrl: `/api/v1/proofs/${proof.id}/verify`,
       credential: this.signCredential(credential),
+      anchoring: anchorResult ?? {
+        anchored: false,
+        reason: "disabled",
+      },
     };
   }
 

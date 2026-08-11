@@ -2,7 +2,7 @@
 
 EarnProof is an open-source, privacy-focused income and payment verification protocol built on Stellar.
 
-This repository contains the NestJS API for wallet authentication, Stellar payment indexing, payment classification, minimum-income proof issuance, public proof verification, proof revocation, and operational health. Issuer management, webhooks, API keys, audit-log expansion, and contract anchoring are planned but not yet wired into the application.
+This repository contains the NestJS API for wallet authentication, Stellar payment indexing, payment classification, minimum-income proof issuance, public proof verification, proof revocation, optional contract anchoring, and operational health. Issuer management, webhooks, API keys, and audit-log expansion are planned but not yet wired into the application.
 
 ## Product Role
 
@@ -28,6 +28,7 @@ Implemented:
 - Public proof verification at `/api/v1/proofs/:id/verify`
 - Authenticated proof revocation at `/api/v1/proofs/:id/revoke`
 - Deterministic credential canonicalization, hashing, and HMAC signing
+- Optional Stellar CLI proof commitment anchoring for deployed proof registry contracts
 - PostgreSQL and Redis Docker Compose services
 - Prisma lifecycle service
 - Prisma schema for core product entities
@@ -56,7 +57,6 @@ Planned next:
 
 - Issuer management
 - Webhooks and API keys
-- Contract anchoring
 - Database-backed verification event enrichment
 - End-to-end API tests with a test database
 
@@ -138,9 +138,18 @@ STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 SESSION_SECRET=replace_me
 CREDENTIAL_SIGNING_SECRET=replace_me
+CONTRACT_ANCHORING_ENABLED=false
+CONTRACT_ANCHORING_REQUIRED=false
+STELLAR_CLI_PATH=stellar
+STELLAR_CLI_SOURCE=
+PROOF_REGISTRY_CONTRACT_ID=
+EARNPROOF_ISSUER_ADDRESS=
+EARNPROOF_SCHEMA_VERSION=1
 ```
 
 Use strong secrets outside local development. Do not commit `.env`.
+
+Contract anchoring stays disabled unless `CONTRACT_ANCHORING_ENABLED=true` and the Stellar CLI source, proof registry contract ID, and issuer address are configured. Set `CONTRACT_ANCHORING_REQUIRED=true` only when proof creation must fail if on-chain registration fails.
 
 ## Validation
 

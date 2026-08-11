@@ -1,9 +1,10 @@
 import { Module } from "@nestjs/common";
+import { ContractAnchoringService } from "./contract-anchoring.service";
 import { ProofsController } from "./proofs.controller";
 import { ProofsService } from "./proofs.service";
 
 @Module({
   controllers: [ProofsController],
-  providers: [ProofsService],
+  providers: [ContractAnchoringService, ProofsService],
 })
 export class ProofsModule {}

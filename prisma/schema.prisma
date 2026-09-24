@@ -128,13 +128,15 @@ model User {
 }
 
 model WalletChallenge {
-  id            String    @id @default(cuid())
-  walletAddress String
-  nonceHash     String    @unique
-  message       String
-  expiresAt     DateTime
-  usedAt        DateTime?
-  createdAt     DateTime  @default(now())
+  id                 String    @id @default(cuid())
+  walletAddress      String
+  nonceHash          String    @unique
+  message            String
+  expiresAt          DateTime
+  usedAt             DateTime?
+  networkPassphrase  String?   /// Stellar network passphrase committed at challenge creation. Null for legacy challenges.
+  origin             String?   /// Normalized application origin committed at challenge creation. Null for legacy challenges.
+  createdAt          DateTime  @default(now())
 
   @@index([walletAddress])
   @@index([expiresAt])

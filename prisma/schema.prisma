@@ -310,15 +310,21 @@ model Attestation {
   subjectWalletHash    String
   paymentReferenceHash String?
   type                 AttestationType
+  schemaVersion        String          @default("1.0")
+  signingKeyVersionId  String          @default("1")
   status               ResourceStatus  @default(ACTIVE)
   signedPayload        Json
   expiresAt            DateTime?
   revokedAt            DateTime?
+  revokedBy            String?
+  revocationReason     String?
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
 
   @@index([issuerId, status])
   @@index([subjectWalletHash])
+  @@index([issuerId, expiresAt])
+  @@index([status, expiresAt])
 }
 
 model VerificationEvent {

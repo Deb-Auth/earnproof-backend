@@ -14,6 +14,7 @@
     "start:nest": "nest start",
     "start:dev": "nest start --watch",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:integration": "jest --config jest.integration.config.js",
@@ -22,6 +23,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed:demo": "ts-node prisma/seed-demo.ts",
+    "backfill:audit-chain": "ts-node scripts/migrations/backfill-audit-log-chain.ts",
     "drill:verify": "ts-node scripts/backup/verify-backup-format.ts",
     "webhook:conformance": "ts-node scripts/webhook-receiver/conformance.ts",
     "webhook:receiver": "ts-node scripts/webhook-receiver/receiver.ts"

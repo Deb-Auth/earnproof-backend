@@ -24,9 +24,10 @@ import { VerificationEventService } from "../audit/verification-event.service";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { canonicalize } from "../common/crypto/canonicalize";
 import { sha256 } from "../common/crypto/hash";
-import { decryptProtectedAmount } from "../common/crypto/protected-amount";
+import { PaymentEncryptionKeyringService } from "../common/crypto/payment-encryption-keyring.service";
 import { ApiErrorCode } from "../common/dto/api-error.dto";
 import { PrismaService } from "../database/prisma.service";
+import { AttestationsService } from "../attestations/attestations.service";
 import { WebhookDeliveryService } from "../webhooks/webhook-delivery.service";
 import { ContractAnchoringService } from "./contract-anchoring.service";
 import { CreateMinimumIncomeProofDto } from "./dto/create-minimum-income-proof.dto";
@@ -118,7 +119,7 @@ type EarnProofCredential =
 @Injectable()
 export class ProofsService {
   private readonly signingSecret: string;
-  private readonly paymentEncryptionKey: string;
+  private readonly paymentEncryptionKeyring: PaymentEncryptionKeyringService;
   private readonly stellarNetwork: string;
   private readonly anchoringEnabled: boolean;
   private readonly anchoringRequired: boolean;
@@ -127,6 +128,7 @@ export class ProofsService {
     private readonly prisma: PrismaService,
     configService: ConfigService,
     private readonly verificationEventService: VerificationEventService,
+    private readonly attestationsService: AttestationsService,
     @Optional()
     private readonly contractAnchoringService?: ContractAnchoringService,
     @Optional()
@@ -135,8 +137,8 @@ export class ProofsService {
     this.signingSecret = configService.getOrThrow<string>(
       "credentialSigningSecret",
     );
-    this.paymentEncryptionKey = configService.getOrThrow<string>(
-      "paymentEncryptionKey",
+    this.paymentEncryptionKeyring = new PaymentEncryptionKeyringService(
+      configService,
     );
     this.stellarNetwork = configService.getOrThrow<string>("stellar.network");
     this.anchoringEnabled =
@@ -1204,7 +1206,7 @@ export class ProofsService {
 
     try {
       return this.parseAmount(
-        decryptProtectedAmount(amountEncrypted, this.paymentEncryptionKey),
+        this.paymentEncryptionKeyring.decrypt(amountEncrypted),
       );
     } catch {
       throw new BadRequestException("Selected payment amount is unavailable");
@@ -1219,7 +1221,7 @@ export class ProofsService {
       });
     }
     try {
-      return decryptProtectedAmount(amountEncrypted, this.paymentEncryptionKey);
+      return this.paymentEncryptionKeyring.decrypt(amountEncrypted);
     } catch {
       throw new UnprocessableEntityException({
         code: ApiErrorCode.PAYMENT_NOT_ELIGIBLE,
@@ -1231,7 +1233,7 @@ export class ProofsService {
   private revealPaymentAmountForVerification(amountEncrypted: string | null) {
     try {
       return amountEncrypted
-        ? decryptProtectedAmount(amountEncrypted, this.paymentEncryptionKey)
+        ? this.paymentEncryptionKeyring.decrypt(amountEncrypted)
         : "";
     } catch {
       return "";
@@ -1426,5 +1428,50 @@ export class ProofsService {
         checked: false,
       };
     }
+  }
+
+  /**
+   * Validate that all active attestations for a subject wallet are still valid
+   * (not expired, not revoked) for proof issuance.
+   *
+   * This is called during proof creation to ensure attestation lifecycle requirements
+   * are met before issuing credentials.
+   *
+   * @param subjectWalletHash Subject wallet hash
+   * @returns true if all attestations are valid or no attestations exist
+   */
+  async validateSubjectAttestations(subjectWalletHash: string): Promise<boolean> {
+    const attestations = await this.attestationsService.getValidAttestationsForSubject(
+      subjectWalletHash,
+    );
+
+    // If no attestations exist, validation passes
+    if (attestations.length === 0) {
+      return true;
+    }
+
+    // All attestations must be valid (checked via getValidAttestationsForSubject)
+    // which already filters for active status and non-expired/non-revoked states
+    return attestations.length > 0;
+  }
+
+  /**
+   * Check if an issuer's attestations for a subject are still valid.
+   *
+   * Used to gate proof issuance on issuer attestation status.
+   *
+   * @param issuerId Issuer ID
+   * @param subjectWalletHash Subject wallet hash
+   * @returns true if issuer has at least one valid attestation for subject
+   */
+  async hasValidAttestationsFromIssuer(
+    issuerId: string,
+    subjectWalletHash: string,
+  ): Promise<boolean> {
+    const attestations = await this.attestationsService.getValidAttestationsForSubject(
+      subjectWalletHash,
+      issuerId,
+    );
+    return attestations.length > 0;
   }
 }

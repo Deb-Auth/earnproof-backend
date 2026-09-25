@@ -1,8 +1,14 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, WebhookDeliveryStatus } from "@prisma/client";
 import { randomUUID } from "crypto";
-import { decryptProtectedAmount } from "../common/crypto/protected-amount";
+import { PaymentEncryptionKeyringService } from "../common/crypto/payment-encryption-keyring.service";
+import { StructuredLogger } from "../common/logger";
 import { PrismaService } from "../database/prisma.service";
 import { WebhookEnvelope, WebhookEventType } from "./webhook-event.types";
 import { WebhookSigningService } from "./webhook-signing.service";
@@ -44,8 +50,8 @@ type WebhookChain = { tail: Promise<void> };
 
 @Injectable()
 export class WebhookDeliveryService implements OnModuleInit {
-  private readonly logger = new Logger(WebhookDeliveryService.name);
-  private readonly encryptionKey: string;
+  private readonly logger = new StructuredLogger(WebhookDeliveryService.name);
+  private readonly paymentEncryptionKeyring: PaymentEncryptionKeyringService;
 
   /**
    * Per-webhook serialization chains.
@@ -58,7 +64,9 @@ export class WebhookDeliveryService implements OnModuleInit {
     private readonly signing: WebhookSigningService,
     configService: ConfigService,
   ) {
-    this.encryptionKey = configService.getOrThrow<string>("paymentEncryptionKey");
+    this.paymentEncryptionKeyring = new PaymentEncryptionKeyringService(
+      configService,
+    );
   }
 
   /**
@@ -180,11 +188,13 @@ export class WebhookDeliveryService implements OnModuleInit {
     });
 
     if (!original) {
-      throw new Error("WebhookDelivery not found");
+      throw new NotFoundException("WebhookDelivery not found");
     }
 
     if (original.webhook.status !== "ACTIVE") {
-      throw new Error("Cannot replay delivery for a disabled webhook endpoint");
+      throw new BadRequestException(
+        "Cannot replay delivery for a disabled webhook endpoint",
+      );
     }
 
     const replayKey = `${originalDeliveryId}:${replayedBy}`;
@@ -310,7 +320,7 @@ export class WebhookDeliveryService implements OnModuleInit {
     // Decrypt signing secret — never stored in plain text or in delivery logs.
     let signingSecret: string;
     try {
-      signingSecret = decryptProtectedAmount(secretEncrypted, this.encryptionKey);
+      signingSecret = this.paymentEncryptionKeyring.decrypt(secretEncrypted);
     } catch (err) {
       this.logger.error(
         `Failed to decrypt signing secret for webhook ${delivery.webhook.id}: ${String(err)}`,

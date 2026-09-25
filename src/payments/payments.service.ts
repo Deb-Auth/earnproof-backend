@@ -6,7 +6,7 @@ import {
   Prisma,
   ResourceStatus,
 } from "@prisma/client";
-import { encryptProtectedAmount } from "../common/crypto/protected-amount";
+import { PaymentEncryptionKeyringService } from "../common/crypto/payment-encryption-keyring.service";
 import { PrismaService } from "../database/prisma.service";
 import { StellarService } from "../stellar/stellar.service";
 import { normalizeMemo } from "../stellar/memo-normalizer";
@@ -14,15 +14,15 @@ import { NormalizedMemo } from "../stellar/stellar.types";
 
 @Injectable()
 export class PaymentsService {
-  private readonly paymentEncryptionKey: string;
+  private readonly paymentEncryptionKeyring: PaymentEncryptionKeyringService;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly stellarService: StellarService,
     configService: ConfigService,
   ) {
-    this.paymentEncryptionKey = configService.getOrThrow<string>(
-      "paymentEncryptionKey",
+    this.paymentEncryptionKeyring = new PaymentEncryptionKeyringService(
+      configService,
     );
   }
 
@@ -50,6 +50,25 @@ export class PaymentsService {
     let enrichmentErrors = 0;
     const memoCache = new Map<string, NormalizedMemo>();
 
+    // Batch the "does this payment already exist" check into a single query
+    // ahead of the loop, instead of one findUnique per incoming payment.
+    // incomingPayments comes from Stellar Horizon and can run into the
+    // hundreds for an active wallet; a query per row turned a sync into N+1
+    // round trips to the database on top of the (already-batched) N calls to
+    // Horizon for memo enrichment.
+    const existingOperationIds = new Set(
+      (
+        await this.prisma.payment.findMany({
+          where: {
+            operationId: {
+              in: incomingPayments.map((payment) => payment.operationId),
+            },
+          },
+          select: { operationId: true },
+        })
+      ).map((row) => row.operationId),
+    );
+
     for (const payment of incomingPayments) {
       const isEligible = supportedAssetKeys.has(
         this.assetKey(payment.assetCode, payment.assetIssuer),
@@ -76,14 +95,7 @@ export class PaymentsService {
         memoCache.set(payment.stellarTransactionHash, memoContext);
       }
 
-      const existing = await this.prisma.payment.findUnique({
-        where: {
-          operationId: payment.operationId,
-        },
-        select: {
-          id: true,
-        },
-      });
+      const existing = existingOperationIds.has(payment.operationId);
 
       await this.prisma.payment.upsert({
         where: {
@@ -217,7 +229,7 @@ export class PaymentsService {
   }
 
   private protectAmount(amount: string) {
-    return encryptProtectedAmount(amount, this.paymentEncryptionKey);
+    return this.paymentEncryptionKeyring.encrypt(amount);
   }
 
   private toPaymentDto(payment: Payment) {

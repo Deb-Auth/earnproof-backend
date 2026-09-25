@@ -549,5 +549,535 @@ describe("ProofsService", () => {
       expect(result.result).toBe(VerificationResult.VALID);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // createIncomeRangeProof
+  // ---------------------------------------------------------------------------
+
+  describe("createIncomeRangeProof", () => {
+    function makePayment(overrides: Record<string, unknown> = {}) {
+      return {
+        id: "payment_1",
+        assetCode: "XLM",
+        assetIssuer: null,
+        amountEncrypted: `redacted:${Buffer.from("1000").toString("base64url")}`,
+        classification: PaymentClassification.INCOME,
+        isEligible: true,
+        occurredAt: new Date("2026-08-01T00:00:00.000Z"),
+        ...overrides,
+      };
+    }
+
+    const baseInput = {
+      selectedPaymentIds: ["payment_1"],
+      lowerBound: "500",
+      upperBound: "1500",
+      assetCode: "XLM",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.000Z",
+    };
+
+    function makeIncomeRangePrisma(
+      payments: unknown[],
+      captureIntent?: (data: unknown) => void,
+    ) {
+      return {
+        payment: {
+          findMany: jest.fn().mockResolvedValue(payments),
+        },
+        $transaction: jest
+          .fn()
+          .mockImplementation(async (fn: (tx: unknown) => unknown) => {
+            const tx = {
+              proof: {
+                create: jest.fn().mockImplementation(({ data }) => ({
+                  id: data.id,
+                  userId: data.userId,
+                  proofType: data.proofType,
+                  schemaVersion: data.schemaVersion,
+                  status: data.status,
+                  network: data.network,
+                  assetCode: data.assetCode,
+                  assetIssuer: data.assetIssuer,
+                  periodStart: data.periodStart,
+                  periodEnd: data.periodEnd,
+                  expiresAt: data.expiresAt,
+                  credentialHash: data.credentialHash,
+                  commitment: data.commitment,
+                  createdAt: data.createdAt,
+                  claim: data.claim.create,
+                })),
+              },
+              anchoringIntent: {
+                create: jest.fn().mockImplementation(({ data }) => {
+                  captureIntent?.(data);
+                  return { id: "intent_1", ...data };
+                }),
+              },
+            };
+            return fn(tx);
+          }),
+      };
+    }
+
+    // --- positive -----------------------------------------------------------
+
+    it("issues a proof when the payment sum falls inside the requested range", async () => {
+      const prisma = makeIncomeRangePrisma([makePayment()]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      const result = await service.createIncomeRangeProof(user, baseInput);
+
+      expect(result.proofId).toBeDefined();
+      expect(result.status).toBe(ProofStatus.ACTIVE);
+      expect(result.credential.claim).toMatchObject({
+        operator: "range",
+        lowerBound: "500",
+        upperBound: "1500",
+        assetCode: "XLM",
+        qualifyingPaymentCount: 1,
+      });
+      expect(result.credential.type).toBe("EarnProofIncomeRangeCredential");
+    });
+
+    it("issues a proof across mixed payments that share the requested asset", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({
+          id: "payment_1",
+          amountEncrypted: `redacted:${Buffer.from("300").toString("base64url")}`,
+        }),
+        makePayment({
+          id: "payment_2",
+          amountEncrypted: `redacted:${Buffer.from("400").toString("base64url")}`,
+          occurredAt: new Date("2026-08-15T00:00:00.000Z"),
+        }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      const result = await service.createIncomeRangeProof(user, {
+        ...baseInput,
+        selectedPaymentIds: ["payment_1", "payment_2"],
+      });
+
+      expect(result.credential.claim).toMatchObject({
+        qualifyingPaymentCount: 2,
+      });
+    });
+
+    // --- boundary -------------------------------------------------------------
+
+    it("accepts a sum exactly equal to the lowerBound (inclusive)", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({
+          amountEncrypted: `redacted:${Buffer.from("500").toString("base64url")}`,
+        }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).resolves.toBeDefined();
+    });
+
+    it("accepts a sum exactly equal to the upperBound (inclusive)", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({
+          amountEncrypted: `redacted:${Buffer.from("1500").toString("base64url")}`,
+        }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).resolves.toBeDefined();
+    });
+
+    it("rejects an inverted range (lowerBound > upperBound)", async () => {
+      const prisma = makeIncomeRangePrisma([makePayment()]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, {
+          ...baseInput,
+          lowerBound: "1500",
+          upperBound: "500",
+        }),
+      ).rejects.toThrow("lowerBound must be strictly less than upperBound");
+    });
+
+    it("rejects a degenerate zero-width range (lowerBound === upperBound)", async () => {
+      const prisma = makeIncomeRangePrisma([makePayment()]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, {
+          ...baseInput,
+          lowerBound: "1000",
+          upperBound: "1000",
+        }),
+      ).rejects.toThrow("lowerBound must be strictly less than upperBound");
+    });
+
+    // --- negative ---------------------------------------------------------
+
+    it("rejects when the payment sum is below the lowerBound", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({
+          amountEncrypted: `redacted:${Buffer.from("100").toString("base64url")}`,
+        }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).rejects.toThrow("do not fall within the requested income range");
+    });
+
+    it("rejects when the payment sum is above the upperBound", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({
+          amountEncrypted: `redacted:${Buffer.from("2000").toString("base64url")}`,
+        }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).rejects.toThrow("do not fall within the requested income range");
+    });
+
+    it("rejects a payment using a different asset than requested", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({ assetCode: "USDC" }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).rejects.toThrow("must use the requested asset");
+    });
+
+    it("rejects mixed-asset selected payments (regression)", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({ id: "payment_1", assetCode: "XLM" }),
+        makePayment({ id: "payment_2", assetCode: "USDC" }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, {
+          ...baseInput,
+          selectedPaymentIds: ["payment_1", "payment_2"],
+        }),
+      ).rejects.toThrow("must use the requested asset");
+    });
+
+    it("rejects a payment belonging to another user (ownership check)", async () => {
+      // findMany scoped to userId returns fewer rows than requested when a
+      // payment id does not resolve for this user.
+      const prisma = makeIncomeRangePrisma([]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).rejects.toThrow("One or more selected payments are invalid");
+    });
+
+    it("rejects a non-INCOME classified payment", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({ classification: PaymentClassification.EXCLUDED }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).rejects.toThrow("must be eligible income payments");
+    });
+
+    it("rejects an ineligible payment", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({ isEligible: false }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).rejects.toThrow("must be eligible income payments");
+    });
+
+    it("rejects a payment that occurred outside the requested period", async () => {
+      const prisma = makeIncomeRangePrisma([
+        makePayment({ occurredAt: new Date("2026-09-15T00:00:00.000Z") }),
+      ]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, baseInput),
+      ).rejects.toThrow("must fall inside the requested period");
+    });
+
+    it("rejects when periodStart is after periodEnd", async () => {
+      const prisma = makeIncomeRangePrisma([makePayment()]);
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      await expect(
+        service.createIncomeRangeProof(user, {
+          ...baseInput,
+          periodStart: "2026-08-31T23:59:59.000Z",
+          periodEnd: "2026-08-01T00:00:00.000Z",
+        }),
+      ).rejects.toThrow("periodStart must be before periodEnd");
+    });
+
+    // --- privacy regression -------------------------------------------------
+
+    it("never leaks the summed total into the disclosure policy or credential", async () => {
+      const capturedClaims: unknown[] = [];
+      const prisma = {
+        payment: {
+          findMany: jest.fn().mockResolvedValue([
+            makePayment({
+              amountEncrypted: `redacted:${Buffer.from("777").toString("base64url")}`,
+            }),
+          ]),
+        },
+        $transaction: jest
+          .fn()
+          .mockImplementation(async (fn: (tx: unknown) => unknown) => {
+            const tx = {
+              proof: {
+                create: jest.fn().mockImplementation(({ data }) => {
+                  capturedClaims.push(data.claim.create);
+                  return {
+                    id: data.id,
+                    userId: data.userId,
+                    proofType: data.proofType,
+                    schemaVersion: data.schemaVersion,
+                    status: data.status,
+                    network: data.network,
+                    assetCode: data.assetCode,
+                    assetIssuer: data.assetIssuer,
+                    periodStart: data.periodStart,
+                    periodEnd: data.periodEnd,
+                    expiresAt: data.expiresAt,
+                    credentialHash: data.credentialHash,
+                    commitment: data.commitment,
+                    createdAt: data.createdAt,
+                    claim: data.claim.create,
+                  };
+                }),
+              },
+              anchoringIntent: { create: jest.fn() },
+            };
+            return fn(tx);
+          }),
+      };
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      const result = await service.createIncomeRangeProof(user, baseInput);
+
+      const serializedClaim = JSON.stringify(capturedClaims[0]);
+      const serializedCredential = JSON.stringify(result.credential);
+
+      // The sum (777) must never appear anywhere in persisted or emitted data.
+      expect(serializedClaim).not.toContain("777");
+      expect(serializedCredential).not.toContain("777");
+      expect(capturedClaims[0]).toMatchObject({
+        operator: "range",
+        disclosurePolicy: {
+          exactIncomeHidden: true,
+          sourceTransactionsHidden: true,
+          qualifyingPaymentCount: 1,
+          lowerBound: "500",
+          upperBound: "1500",
+        },
+      });
+    });
+
+    // --- anchoring parity with createMinimumIncomeProof ---------------------
+
+    it("enqueues a REGISTER anchoring intent identically to createMinimumIncomeProof when anchoring is enabled", async () => {
+      const capturedIntents: unknown[] = [];
+      const prisma = makeIncomeRangePrisma([makePayment()], (data) =>
+        capturedIntents.push(data),
+      );
+      const service = new ProofsService(
+        prisma as never,
+        makeConfig(true) as never,
+        mockVerificationEventService,
+      );
+
+      const result = await service.createIncomeRangeProof(user, baseInput);
+
+      expect(capturedIntents).toHaveLength(1);
+      expect(capturedIntents[0]).toMatchObject({
+        operation: AnchoringOperation.REGISTER,
+        status: AnchoringStatus.PENDING,
+      });
+      expect(result.anchoring).toEqual({ anchored: false, reason: "pending" });
+    });
+
+    it("does not enqueue an anchoring intent when anchoring is disabled", async () => {
+      const capturedIntents: unknown[] = [];
+      const prisma = makeIncomeRangePrisma([makePayment()], (data) =>
+        capturedIntents.push(data),
+      );
+      const service = new ProofsService(
+        prisma as never,
+        makeConfig(false) as never,
+        mockVerificationEventService,
+      );
+
+      const result = await service.createIncomeRangeProof(user, baseInput);
+
+      expect(capturedIntents).toHaveLength(0);
+      expect(result.anchoring).toEqual({
+        anchored: false,
+        reason: "disabled",
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // verifyProof — INCOME_RANGE
+  // ---------------------------------------------------------------------------
+
+  describe("verifyProof — income range", () => {
+    it("rebuilds and verifies an INCOME_RANGE credential without leaking the sum", async () => {
+      const credential = {
+        id: "proof_range",
+        type: "EarnProofIncomeRangeCredential",
+        schemaVersion: "earnproof.income-range.v1",
+        issuer: "earnproof-backend",
+        subject: { walletHash: "sha256:wallet" },
+        claim: {
+          operator: "range",
+          lowerBound: "500",
+          upperBound: "1500",
+          assetCode: "XLM",
+          assetIssuer: null,
+          periodStart: "2026-08-01T00:00:00.000Z",
+          periodEnd: "2026-08-31T23:59:59.000Z",
+          qualifyingPaymentCount: 1,
+        },
+        privacy: { exactIncomeHidden: true, sourceTransactionsHidden: true },
+        issuedAt: "2026-08-02T00:00:00.000Z",
+        expiresAt: "2026-10-01T00:00:00.000Z",
+      };
+      const prisma = {
+        proof: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: "proof_range",
+            userId: "user_1",
+            proofType: ProofType.INCOME_RANGE,
+            schemaVersion: "earnproof.income-range.v1",
+            status: ProofStatus.ACTIVE,
+            network: "testnet",
+            assetCode: "XLM",
+            assetIssuer: null,
+            periodStart: new Date("2026-08-01T00:00:00.000Z"),
+            periodEnd: new Date("2026-08-31T23:59:59.000Z"),
+            expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+            revokedAt: null,
+            createdAt: new Date("2026-08-02T00:00:00.000Z"),
+            credentialHash: `sha256:${sha256(canonicalize(credential))}`,
+            contractTransactionHash: null,
+            user: { walletHash: "sha256:wallet" },
+            claim: {
+              thresholdEncrypted: null,
+              frequency: null,
+              disclosurePolicy: {
+                qualifyingPaymentCount: 1,
+                lowerBound: "500",
+                upperBound: "1500",
+              },
+            },
+          }),
+        },
+        verificationEvent: {
+          create: jest.fn().mockResolvedValue({ id: "event_1" }),
+        },
+      };
+      const service = new ProofsService(
+        prisma as never,
+        config as never,
+        mockVerificationEventService,
+      );
+
+      const result = await service.verifyProof("proof_range");
+
+      expect(result.result).toBe(VerificationResult.VALID);
+      expect(result.status).toBe("valid");
+      expect(result.credential?.claim).toMatchObject({
+        operator: "range",
+        lowerBound: "500",
+        upperBound: "1500",
+      });
+    });
+  });
 });
 

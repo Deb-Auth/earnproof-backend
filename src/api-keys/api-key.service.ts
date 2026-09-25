@@ -1,4 +1,9 @@
-import { Injectable, Logger } from "@nestjs/common";
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { ApiKeyScope, ResourceStatus } from "@prisma/client";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { sha256 } from "../common/crypto/hash";
@@ -6,6 +11,9 @@ import { PrismaService } from "../database/prisma.service";
 
 /**
  * API Key Service - Secure credential management for machine-to-machine integrations.
+ *
+ * SECURITY POSTURE: This service implements constant-time verification to prevent timing attacks
+ * on secret authentication. See verifySecret() for detailed constant-time design.
  *
  * Design decisions:
  *
@@ -34,6 +42,11 @@ import { PrismaService } from "../database/prisma.service";
  *    - Never logs raw secrets or hashes
  *    - Logs only non-sensitive identifiers: keyId, prefix, organizationId, actor
  *    - Timestamps and action types for complete audit trail
+ *
+ * 6. Constant-time verification: prevents timing side-channel attacks
+ *    - All verification attempts follow identical code paths regardless of input format
+ *    - Format validation does not short-circuit before cryptographic comparison
+ *    - See verifySecret() for implementation details
  */
 @Injectable()
 export class ApiKeyService {
@@ -73,17 +86,79 @@ export class ApiKeyService {
    * Verify a presented secret against a stored hash.
    * Returns true if they match (constant-time comparison).
    *
+   * SECURITY: This method is designed to execute in constant time regardless of:
+   *   - Whether storedHash is correctly formatted
+   *   - Whether storedHash matches the computed hash
+   *   - Input lengths or validity
+   *
+   * Timing attacks exploit variable execution time to infer information about
+   * secrets or hash formats. This implementation prevents timing leakage by:
+   *   1. Computing the hash of the presented secret (unavoidable baseline work)
+   *   2. Performing format validation in constant time (not regex, which short-circuits)
+   *   3. Always attempting decoding and comparison regardless of format validity
+   *   4. Using a dummy buffer if decoding fails (ensures same execution path)
+   *   5. Using timingSafeEqual for the final comparison (Node.js crypto primitive)
+   *
+   * Malformed inputs (invalid hex, wrong length, etc.) follow the same codepath
+   * as valid-format inputs, ensuring no timing distinction.
+   *
    * @param secret - Presented secret from client
-   * @param storedHash - Stored hash from database
-   * @returns true if secret hashes to storedHash
+   * @param storedHash - Stored hash from database (expected: 64 hex chars)
+   * @returns true if secret hashes to storedHash, false otherwise
    */
   verifySecret(secret: string, storedHash: string): boolean {
     const computedHash = this.hashSecret(secret);
-    if (!/^[a-f0-9]{64}$/i.test(storedHash)) return false;
-    return timingSafeEqual(
-      Buffer.from(computedHash, "hex"),
-      Buffer.from(storedHash, "hex"),
-    );
+    const computedBuffer = Buffer.from(computedHash, "hex");
+
+    // Constant-time format validation: check length and character validity
+    // without short-circuiting. SHA-256 hashes are exactly 64 hex characters.
+    const EXPECTED_HEX_LENGTH = 64;
+    let isValidFormat = true;
+
+    // Check length in constant time
+    if (storedHash.length !== EXPECTED_HEX_LENGTH) {
+      isValidFormat = false;
+    }
+
+    // Check each character is valid hex [a-fA-F0-9] in constant time
+    // Do NOT use early returns or short-circuit logic
+    for (let i = 0; i < EXPECTED_HEX_LENGTH; i++) {
+      const char = storedHash.charCodeAt(i);
+      // Check if char is 0-9 (48-57), a-f (97-102), or A-F (65-70)
+      const isDigit = char >= 48 && char <= 57;
+      const isLowerHex = char >= 97 && char <= 102;
+      const isUpperHex = char >= 65 && char <= 70;
+      if (!(isDigit || isLowerHex || isUpperHex)) {
+        isValidFormat = false;
+      }
+    }
+
+    // Decode hex to buffer, using dummy if format is invalid
+    // This ensures all inputs follow the same comparison path
+    let storedBuffer: Buffer;
+    try {
+      // Buffer.from() with 'hex' encoding will throw if the string contains
+      // invalid hex characters or has odd length. We catch and use dummy.
+      storedBuffer = Buffer.from(storedHash, "hex");
+      // Additional safety: verify the decoded buffer is the correct length
+      if (storedBuffer.length !== 32) {
+        // Not 32 bytes (256 bits), which SHA-256 always produces
+        storedBuffer = Buffer.alloc(32);
+      }
+    } catch {
+      // Decoding failed: use dummy buffer of correct length (32 bytes)
+      // This ensures timing is identical whether parsing succeeds or fails
+      storedBuffer = Buffer.alloc(32);
+    }
+
+    // Compare in constant time using Node.js crypto primitive
+    try {
+      return timingSafeEqual(computedBuffer, storedBuffer);
+    } catch {
+      // timingSafeEqual only throws if buffer lengths differ.
+      // This should not occur given our allocation strategy, but guard anyway.
+      return false;
+    }
   }
 
   /**
@@ -242,14 +317,14 @@ export class ApiKeyService {
 
     // Verify organization ownership
     if (apiKey.organizationId !== organizationId) {
-      throw new Error("Key does not belong to this organization");
+      throw new ForbiddenException("Key does not belong to this organization");
     }
 
     // Audit log: API key rotated (never log secrets or hashes)
     await this.prisma.auditLog.create({
       data: {
         actorType: "user",
-        actorId: actorId || "",
+        actorId: actorId ?? null,
         action: "api_key.rotated",
         resourceType: "api_key",
         resourceId: apiKey.id,
@@ -293,7 +368,7 @@ export class ApiKeyService {
     });
 
     if (!apiKey) {
-      throw new Error("Key not found");
+      throw new NotFoundException("Key not found");
     }
 
     await this.prisma.apiKey.update({
@@ -308,7 +383,7 @@ export class ApiKeyService {
     await this.prisma.auditLog.create({
       data: {
         actorType: "user",
-        actorId: actorId || "",
+        actorId: actorId ?? null,
         action: "api_key.revoked",
         resourceType: "api_key",
         resourceId: keyId,

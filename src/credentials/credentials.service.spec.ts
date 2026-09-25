@@ -10,6 +10,7 @@ import { CredentialsService } from "./credentials.service";
 // ---------------------------------------------------------------------------
 
 const SIGNING_SECRET = "test-signing-secret";
+const FUTURE_EXPIRY = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
 const config = {
   getOrThrow: jest.fn((key: string) => {
@@ -39,7 +40,7 @@ function buildCredentialBody(overrides: Partial<Record<string, unknown>> = {}) {
     },
     privacy: { exactIncomeHidden: true as const, sourceTransactionsHidden: true as const },
     issuedAt: "2026-08-02T00:00:00.000Z",
-    expiresAt: "2026-09-02T00:00:00.000Z",
+    expiresAt: FUTURE_EXPIRY.toISOString(),
     ...overrides,
   };
 }
@@ -88,7 +89,7 @@ describe("CredentialsService.verifyCredential", () => {
 
     const prisma = mockPrismaWith({
       status: ProofStatus.ACTIVE,
-      expiresAt: new Date("2026-09-02T00:00:00.000Z"), // future
+      expiresAt: FUTURE_EXPIRY, // future
       schemaVersion: "earnproof.minimum-income.v1",
     });
 
@@ -253,7 +254,7 @@ describe("CredentialsService.verifyCredential", () => {
 
     const prisma = mockPrismaWith({
       status: ProofStatus.REVOKED,
-      expiresAt: new Date("2026-09-02T00:00:00.000Z"), // future
+      expiresAt: FUTURE_EXPIRY, // future
       schemaVersion: "earnproof.minimum-income.v1",
     });
 

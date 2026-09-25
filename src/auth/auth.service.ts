@@ -93,7 +93,12 @@ export class AuthService {
       input.clientMetadata,
     );
 
-    const challenge = await this.prisma.walletChallenge.findFirst({
+    // Atomically mark the challenge as consumed only if it exists, is not
+    // used, and is not expired. This prevents TOCTOU race conditions where
+    // multiple concurrent requests could both pass an existence check before
+    // any of them are marked as used — only one caller can ever win this
+    // conditional update.
+    const consumedChallenge = await this.prisma.walletChallenge.updateMany({
       where: {
         id: input.challengeId,
         walletAddress: input.walletAddress,
@@ -106,19 +111,9 @@ export class AuthService {
     });
 
     if (consumedChallenge.count === 0) {
-      throw new UnauthorizedException("Challenge is expired or unavailable");
-    }
-
-    // Fetch the challenge again to get the message for signature verification.
-    // The challenge is now marked as used, so even if verification fails, it cannot be reused.
-    const challenge = await this.prisma.walletChallenge.findUnique({
-      where: {
-        id: input.challengeId,
-      },
-    });
-
-    if (!challenge) {
-      // Determine if challenge was used (replay) or expired
+      // Determine if the challenge was already used (replay) or is expired /
+      // never existed, purely for audit-trail accuracy — the caller always
+      // receives the same generic error either way.
       const usedChallenge = await this.prisma.walletChallenge.findFirst({
         where: {
           id: input.challengeId,
@@ -154,6 +149,20 @@ export class AuthService {
       throw new UnauthorizedException("Challenge is expired or unavailable");
     }
 
+    // Fetch the now-consumed challenge to get the message for signature
+    // verification. It is already marked as used, so even if verification
+    // fails below, it cannot be reused (no signature-oracle attack).
+    const challenge = await this.prisma.walletChallenge.findUnique({
+      where: {
+        id: input.challengeId,
+      },
+    });
+
+    if (!challenge) {
+      // Should never happen: we just consumed this row atomically above.
+      throw new UnauthorizedException("Challenge is expired or unavailable");
+    }
+
     const isValid = this.verifySignature(
       input.walletAddress,
       challenge.message,
@@ -186,12 +195,8 @@ export class AuthService {
       },
     });
 
-    // Mark challenge as consumed before issuing a session so that a crash
-    // between the two writes leaves no valid challenge open.
-    await this.prisma.walletChallenge.update({
-      where: { id: challenge.id },
-      data: { usedAt: new Date() },
-    });
+    // The challenge was already atomically marked as consumed above, before
+    // signature verification — no further write is needed here.
 
     // Create a persisted, revocable session.  Only the hash is stored.
     const { token, sessionId, expiresAt } = await this.sessionService.create({

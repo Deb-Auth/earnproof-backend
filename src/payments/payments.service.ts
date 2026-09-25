@@ -6,6 +6,7 @@ import {
   Prisma,
   ResourceStatus,
 } from "@prisma/client";
+import { canonicalAssetId } from "../common/assets/asset-identifier";
 import { encryptProtectedAmount } from "../common/crypto/protected-amount";
 import { PrismaService } from "../database/prisma.service";
 import { StellarService } from "../stellar/stellar.service";
@@ -15,6 +16,7 @@ import { NormalizedMemo } from "../stellar/stellar.types";
 @Injectable()
 export class PaymentsService {
   private readonly paymentEncryptionKey: string;
+  private readonly stellarNetwork: string;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -24,15 +26,23 @@ export class PaymentsService {
     this.paymentEncryptionKey = configService.getOrThrow<string>(
       "paymentEncryptionKey",
     );
+    this.stellarNetwork = configService.getOrThrow<string>("stellar.network");
   }
 
   async syncPayments(user: { id: string; walletAddress: string }) {
     const incomingPayments = await this.stellarService.fetchIncomingPayments(
       user.walletAddress,
     );
+    // Eligibility is governed by the active asset definition for THIS
+    // deployment's network. Without the network filter, a SupportedAsset row
+    // seeded for a different network (e.g. mainnet) with the same code/issuer
+    // as a testnet row - which happens for the native asset, since it has no
+    // issuer to disambiguate networks - could make a payment eligible based
+    // on the wrong network's policy.
     const supportedAssets = await this.prisma.supportedAsset.findMany({
       where: {
         status: ResourceStatus.ACTIVE,
+        network: this.stellarNetwork,
       },
       select: {
         code: true,
@@ -41,7 +51,13 @@ export class PaymentsService {
       },
     });
     const supportedAssetKeys = new Set(
-      supportedAssets.map((asset) => this.assetKey(asset.code, asset.issuer)),
+      supportedAssets.map((asset) =>
+        canonicalAssetId({
+          network: asset.network,
+          code: asset.code,
+          issuer: asset.issuer,
+        }),
+      ),
     );
 
     let created = 0;
@@ -52,7 +68,11 @@ export class PaymentsService {
 
     for (const payment of incomingPayments) {
       const isEligible = supportedAssetKeys.has(
-        this.assetKey(payment.assetCode, payment.assetIssuer),
+        canonicalAssetId({
+          network: this.stellarNetwork,
+          code: payment.assetCode,
+          issuer: payment.assetIssuer,
+        }),
       );
 
       if (!isEligible) {
@@ -210,10 +230,6 @@ export class PaymentsService {
     });
 
     return this.toPaymentDto(updated);
-  }
-
-  private assetKey(code: string, issuer: string | null) {
-    return `${code}:${issuer ?? "native"}`;
   }
 
   private protectAmount(amount: string) {
